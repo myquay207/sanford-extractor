@@ -85,15 +85,26 @@ def call_gemini(pil_images: list, drug_name: str, api_key: str) -> dict:
     for img in pil_images:
         parts.append(img)
 
-    response = model.generate_content(
-        parts,
-        generation_config=genai.GenerationConfig(temperature=0.1, max_output_tokens=4096),
+    last_err = None
+    for attempt in range(3):
+        try:
+            response = model.generate_content(
+                parts,
+                generation_config=genai.GenerationConfig(temperature=0.1, max_output_tokens=8192),
+            )
+            raw = response.text.strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2)
+            continue
+    raise json.JSONDecodeError(
+        f"Gemini trả về JSON không hợp lệ sau 3 lần thử: {last_err}",
+        "", 0
     )
-
-    raw = response.text.strip()
-    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw = re.sub(r"\s*```$", "", raw)
-    return json.loads(raw)
 
 
 def generate_new_id(content: str, prefix: str = "sf") -> str:
@@ -360,7 +371,12 @@ if run_btn:
     except json.JSONDecodeError as e:
         progress.progress(0)
         st.error(f"❌ Gemini trả về JSON không hợp lệ: {e}")
-        st.warning("Thử chụp lại ảnh rõ hơn hoặc thêm ảnh bổ sung.")
+        st.warning("Gemini trả về JSON bị cắt. Nguyên nhân thường gặp: ảnh quá nhiều text, ảnh mờ, hoặc Gemini quá tải. Hãy thử lại lần nữa hoặc giảm số ảnh xuống.")
+        with st.expander("🔍 Xem raw output từ Gemini"):
+            try:
+                st.code(response.text[:3000], language="json")
+            except:
+                st.write("Không có output để hiển thị.")
 
     except Exception as e:
         progress.progress(0)
