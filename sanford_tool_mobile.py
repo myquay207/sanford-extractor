@@ -230,26 +230,29 @@ drug_name = st.text_input(
 # BƯỚC 2: UPLOAD ẢNH (hỗ trợ nhiều ảnh)
 # ══════════════════════════════════════════════
 st.markdown('<div class="step-label">Bước 2 — Upload ảnh Sanford Guide</div>', unsafe_allow_html=True)
-st.caption("📱 Chụp ảnh bằng điện thoại → chọn nhiều ảnh cùng lúc (2–3 ảnh/thuốc)")
+st.caption("📱 Chọn nhiều ảnh cùng lúc — không giới hạn số lượng (30–40 ảnh đều được)")
 
 uploaded_files = st.file_uploader(
     "Chọn ảnh",
     type=["jpg", "jpeg", "png", "webp", "bmp", "gif"],
     accept_multiple_files=True,
     label_visibility="collapsed",
-    help="Bấm vào đây để chọn hoặc chụp ảnh từ điện thoại",
+    help="Bấm vào đây → chọn tất cả ảnh cần nạp",
 )
 
 pil_images = []
 if uploaded_files:
     st.success(f"✅ Đã chọn **{len(uploaded_files)} ảnh**")
-    # Hiển thị preview — 2 cột để gọn trên điện thoại
+    # Chỉ preview 4 ảnh đầu, load hết vào bộ nhớ nhưng không render tất cả
     cols = st.columns(2)
     for i, f in enumerate(uploaded_files):
         img = Image.open(f)
         pil_images.append(img)
-        with cols[i % 2]:
-            st.image(img, caption=f.name, use_container_width=True)
+        if i < 4:
+            with cols[i % 2]:
+                st.image(img, caption=f.name, use_container_width=True)
+    if len(uploaded_files) > 4:
+        st.caption(f"... và {len(uploaded_files) - 4} ảnh khác (đã nạp vào bộ nhớ, không hiển thị để tránh lag)")
 
 
 # ══════════════════════════════════════════════
