@@ -203,6 +203,7 @@ with st.sidebar:
         "🟣 Tím (Oxazolidinone)": "#7209b7",
         "💙 Indigo (Aminoglycoside)": "#4361ee",
         "🟤 Nâu đỏ (Polymyxin)": "#9b2226",
+        "🟡 Vàng (Quinolone)": "#e9c46a",
     }
     selected_label = st.selectbox("Chọn màu", list(color_presets.keys()))
     selected_color = color_presets[selected_label]
