@@ -13,7 +13,7 @@ import streamlit as st
 import json, re, time
 import google.generativeai as genai
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-1.5-flash"
 
 # ══════════════════════════════════════════════════════════════════
 # PROMPTS
@@ -339,7 +339,18 @@ with tab_sanford:
         label_visibility="collapsed",
         key="sf_text",
     )
-    if sf_text:
+    # Upload file .txt thay thế cho paste
+    sf_txt_file = st.file_uploader(
+        "Hoặc upload file .txt",
+        type=["txt"],
+        label_visibility="visible",
+        key="sf_txt",
+        help="Upload file .txt từ Gemini app — tự động điền vào ô text trên"
+    )
+    if sf_txt_file:
+        sf_text = sf_txt_file.read().decode("utf-8")
+        st.success(f"✅ Đã đọc file: {sf_txt_file.name} — {len(sf_text.split())} từ")
+    elif sf_text:
         word_count = len(sf_text.split())
         st.caption(f"📝 {word_count} từ — {len(sf_text)} ký tự")
 
@@ -433,7 +444,18 @@ with tab_choray:
         label_visibility="collapsed",
         key="cr_text",
     )
-    if cr_text:
+    # Upload file .txt thay thế cho paste
+    cr_txt_file = st.file_uploader(
+        "Hoặc upload file .txt",
+        type=["txt"],
+        label_visibility="visible",
+        key="cr_txt",
+        help="Upload file .txt từ Gemini app — tự động điền vào ô text trên"
+    )
+    if cr_txt_file:
+        cr_text = cr_txt_file.read().decode("utf-8")
+        st.success(f"✅ Đã đọc file: {cr_txt_file.name} — {len(cr_text.split())} từ")
+    elif cr_text:
         word_count = len(cr_text.split())
         st.caption(f"📝 {word_count} từ — {len(cr_text)} ký tự")
 
