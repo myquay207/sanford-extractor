@@ -10,10 +10,10 @@ streamlit run sanford_tool_mobile.py
 """
 
 import streamlit as st
-import google.generativeai as genai
 import json, re, time
+import anthropic
 
-GEMINI_MODEL = "gemini-2.5-flash"
+CLAUDE_MODEL = "claude-sonnet-4-20250514"
 
 # ══════════════════════════════════════════════════════════════════
 # PROMPTS
@@ -147,18 +147,20 @@ NỘI DUNG PHÁC ĐỒ:
 # HÀM XỬ LÝ
 # ══════════════════════════════════════════════════════════════════
 
-def call_gemini_text(text_content: str, prompt: str, api_key: str) -> dict | list:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(GEMINI_MODEL)
+def call_claude(text_content: str, prompt: str) -> dict | list:
+    api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+    client = anthropic.Anthropic(api_key=api_key)
     full_prompt = prompt + text_content
     last_err = None
     for attempt in range(3):
         try:
-            response = model.generate_content(
-                full_prompt,
-                generation_config=genai.GenerationConfig(temperature=0.1, max_output_tokens=8192),
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=8192,
+                temperature=0.1,
+                messages=[{"role": "user", "content": full_prompt}],
             )
-            raw = response.text.strip()
+            raw = response.content[0].text.strip()
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             return json.loads(raw)
@@ -270,11 +272,6 @@ Chụp ảnh sách → Mở <b>Gemini app</b> → Đính ảnh → Nhắn <i>"đ
 # ── Sidebar ────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Cấu hình")
-    api_key = st.text_input("Gemini API Key", type="password", placeholder="AIza...",
-                            help="https://aistudio.google.com/app/apikey")
-    st.caption("Key chỉ cần nhập 1 lần mỗi phiên — lưu trong session")
-
-    st.divider()
     st.markdown("**Màu nhóm thuốc** (Tab Sanford)")
     color_presets = {
         "🔴 Đỏ (Carbapenem)":           "#e63946",
@@ -289,13 +286,6 @@ with st.sidebar:
     sel = st.selectbox("Chọn màu", list(color_presets.keys()))
     final_color = st.color_picker("Tùy chỉnh", value=color_presets[sel], key="cp")
 
-    st.divider()
-    st.markdown("""
-**Lấy Gemini API Key:**
-1. Vào [aistudio.google.com](https://aistudio.google.com/app/apikey)
-2. Nhấn **Create API Key**
-3. Copy → dán vào ô trên
-    """)
 
 # ══════════════════════════════════════════════════════════════════
 tab_sanford, tab_choray = st.tabs(["📘 Thuốc Sanford Guide", "🏥 Phác đồ Chợ Rẫy"])
@@ -334,13 +324,12 @@ with tab_sanford:
         st.success(f"✅ {len(ids)} thuốc hiện có — ID tiếp theo: `{nxt}`")
 
     st.markdown('<div class="step-label">Bước 4 — Trích xuất</div>', unsafe_allow_html=True)
-    sf_ready = bool(drug_name.strip()) and bool(sf_text.strip()) and bool(sf_js_content) and bool(api_key)
+    sf_ready = bool(drug_name.strip()) and bool(sf_text.strip()) and bool(sf_js_content)
     if not sf_ready:
         miss = []
         if not drug_name.strip(): miss.append("tên thuốc")
         if not sf_text.strip(): miss.append("text Sanford")
         if not sf_js_content: miss.append("data-sanford.js")
-        if not api_key: miss.append("API Key (sidebar)")
         st.info(f"ℹ️ Còn thiếu: {', '.join(miss)}")
 
     if st.button("🚀 Trích xuất thuốc Sanford", disabled=not sf_ready,
@@ -350,7 +339,7 @@ with tab_sanford:
             t0 = time.time()
             prog.progress(20, text="🤖 Gemini đang phân tích text...")
             full_text = f"Thuốc: {drug_name.strip()}\n\n{sf_text.strip()}"
-            result = call_gemini_text(full_text, SANFORD_PROMPT, api_key)
+            result = call_claude(full_text, SANFORD_PROMPT)
             elapsed = time.time() - t0
             result["color"] = final_color
             prog.progress(70, text="✅ Xong — ghép vào JS...")
@@ -428,12 +417,11 @@ with tab_choray:
         st.success(f"✅ {len(ids)} mục `{cr_prefix}_*` hiện có — ID tiếp theo: `{nxt}`")
 
     st.markdown('<div class="step-label">Bước 4 — Trích xuất</div>', unsafe_allow_html=True)
-    cr_ready = bool(cr_text.strip()) and bool(cr_js_content) and bool(api_key)
+    cr_ready = bool(cr_text.strip()) and bool(cr_js_content)
     if not cr_ready:
         miss = []
         if not cr_text.strip(): miss.append("text phác đồ")
         if not cr_js_content: miss.append("data-choray.js")
-        if not api_key: miss.append("API Key (sidebar)")
         st.info(f"ℹ️ Còn thiếu: {', '.join(miss)}")
 
     if st.button("🚀 Trích xuất phác đồ Chợ Rẫy", disabled=not cr_ready,
@@ -442,7 +430,7 @@ with tab_choray:
         try:
             t0 = time.time()
             prog.progress(20, text="🤖 Gemini đang phân tích phác đồ...")
-            result = call_gemini_text(cr_text.strip(), cr_prompt, api_key)
+            result = call_claude(cr_text.strip(), cr_prompt)
             elapsed = time.time() - t0
             prog.progress(70, text="✅ Xong — ghép vào JS...")
 
