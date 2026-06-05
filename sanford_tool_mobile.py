@@ -11,9 +11,9 @@ streamlit run sanford_tool_mobile.py
 
 import streamlit as st
 import json, re, time
-import anthropic
+import google.generativeai as genai
 
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # ══════════════════════════════════════════════════════════════════
 # PROMPTS
@@ -147,25 +147,27 @@ NỘI DUNG PHÁC ĐỒ:
 # HÀM XỬ LÝ
 # ══════════════════════════════════════════════════════════════════
 
-def call_claude(text_content: str, prompt: str) -> dict | list:
-    api_key = (
+def get_api_key() -> str:
+    return (
         st.session_state.get("manual_api_key", "")
-        or st.secrets.get("ANTHROPIC_API_KEY", "")
+        or st.secrets.get("GEMINI_API_KEY", "")
     )
+
+def call_ai(text_content: str, prompt: str) -> dict | list:
+    api_key = get_api_key()
     if not api_key:
-        raise ValueError("Chưa có API key. Nhập vào ô bên dưới.")
-    client = anthropic.Anthropic(api_key=api_key)
+        raise ValueError("Chưa có API key.")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(GEMINI_MODEL)
     full_prompt = prompt + text_content
     last_err = None
     for attempt in range(3):
         try:
-            response = client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=8192,
-                temperature=0.1,
-                messages=[{"role": "user", "content": full_prompt}],
+            response = model.generate_content(
+                full_prompt,
+                generation_config=genai.GenerationConfig(temperature=0.1, max_output_tokens=8192),
             )
-            raw = response.content[0].text.strip()
+            raw = response.text.strip()
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             return json.loads(raw)
@@ -279,24 +281,25 @@ with st.sidebar:
     st.header("⚙️ Cấu hình")
 
     # Kiểm tra key từ secrets trước
-    _secret_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+    _secret_key = st.secrets.get("GEMINI_API_KEY", "")
     if _secret_key:
-        st.success("✅ API Key đã cấu hình")
+        st.success("✅ Gemini API Key đã cấu hình")
     else:
-        st.markdown("**🔑 Anthropic API Key**")
+        st.markdown("**🔑 Gemini API Key** (miễn phí)")
         _manual_key = st.text_input(
             "API Key",
             type="password",
-            placeholder="sk-ant-...",
+            placeholder="AIza...",
             label_visibility="collapsed",
             key="manual_api_key_input",
         )
         if _manual_key:
             st.session_state["manual_api_key"] = _manual_key
-            st.success("✅ Key đã nhập")
+            st.success("✅ Key đã nhập — sẽ nhớ trong phiên này")
         else:
-            st.warning("Cần nhập API Key để chạy")
-            st.caption("[Lấy key tại console.anthropic.com](https://console.anthropic.com)")
+            st.warning("Cần nhập Gemini API Key")
+            st.caption("[Lấy key miễn phí tại aistudio.google.com](https://aistudio.google.com/app/apikey)")
+            st.caption("Free tier: 15 req/phút, không tốn tiền")
 
     st.divider()
     st.markdown("**Màu nhóm thuốc** (Tab Sanford)")
@@ -351,10 +354,10 @@ with tab_sanford:
         st.success(f"✅ {len(ids)} thuốc hiện có — ID tiếp theo: `{nxt}`")
 
     st.markdown('<div class="step-label">Bước 4 — Trích xuất</div>', unsafe_allow_html=True)
-    sf_ready = bool(drug_name.strip()) and bool(sf_text.strip()) and bool(sf_js_content) and bool(st.session_state.get("manual_api_key") or st.secrets.get("ANTHROPIC_API_KEY",""))
+    sf_ready = bool(drug_name.strip()) and bool(sf_text.strip()) and bool(sf_js_content) and bool(st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY",""))
     if not sf_ready:
         miss = []
-        if not (st.session_state.get("manual_api_key") or st.secrets.get("ANTHROPIC_API_KEY","")): miss.append("API Key (sidebar)")
+        if not (st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")): miss.append("API Key (sidebar)")
         if not drug_name.strip(): miss.append("tên thuốc")
         if not sf_text.strip(): miss.append("text Sanford")
         if not sf_js_content: miss.append("data-sanford.js")
@@ -367,7 +370,7 @@ with tab_sanford:
             t0 = time.time()
             prog.progress(20, text="🤖 Gemini đang phân tích text...")
             full_text = f"Thuốc: {drug_name.strip()}\n\n{sf_text.strip()}"
-            result = call_claude(full_text, SANFORD_PROMPT)
+            result = call_ai(full_text, SANFORD_PROMPT)
             elapsed = time.time() - t0
             result["color"] = final_color
             prog.progress(70, text="✅ Xong — ghép vào JS...")
@@ -445,10 +448,10 @@ with tab_choray:
         st.success(f"✅ {len(ids)} mục `{cr_prefix}_*` hiện có — ID tiếp theo: `{nxt}`")
 
     st.markdown('<div class="step-label">Bước 4 — Trích xuất</div>', unsafe_allow_html=True)
-    cr_ready = bool(cr_text.strip()) and bool(cr_js_content) and bool(st.session_state.get("manual_api_key") or st.secrets.get("ANTHROPIC_API_KEY",""))
+    cr_ready = bool(cr_text.strip()) and bool(cr_js_content) and bool(st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY",""))
     if not cr_ready:
         miss = []
-        if not (st.session_state.get("manual_api_key") or st.secrets.get("ANTHROPIC_API_KEY","")): miss.append("API Key (sidebar)")
+        if not (st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")): miss.append("API Key (sidebar)")
         if not cr_text.strip(): miss.append("text phác đồ")
         if not cr_js_content: miss.append("data-choray.js")
         st.info(f"ℹ️ Còn thiếu: {', '.join(miss)}")
@@ -459,7 +462,7 @@ with tab_choray:
         try:
             t0 = time.time()
             prog.progress(20, text="🤖 Gemini đang phân tích phác đồ...")
-            result = call_claude(cr_text.strip(), cr_prompt)
+            result = call_ai(cr_text.strip(), cr_prompt)
             elapsed = time.time() - t0
             prog.progress(70, text="✅ Xong — ghép vào JS...")
 
