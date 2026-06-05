@@ -13,7 +13,7 @@ import streamlit as st
 import json, re, time
 import google.generativeai as genai
 
-GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_MODEL = "gemini-1.5-flash-latest"
 
 # ══════════════════════════════════════════════════════════════════
 # PROMPTS
