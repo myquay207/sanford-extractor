@@ -179,7 +179,10 @@ def call_ai(text_content: str, prompt: str) -> dict | list:
 
 
 def generate_new_id(content: str, prefix: str) -> str:
-    ids = re.findall(rf'id:\s*"{prefix}_(\d+)"', content)
+    # Match cả 2 format:
+    #   JS object style:  id: "emp_5"
+    #   JSON style:       "id": "emp_5"
+    ids = re.findall(rf'"?id"?\s*:\s*"{prefix}_(\d+)"', content)
     next_num = max(int(i) for i in ids) + 1 if ids else 1
     return f"{prefix}_{next_num}"
 
@@ -360,7 +363,7 @@ with tab_sanford:
     sf_js_content = None
     if sf_js_file:
         sf_js_content = sf_js_file.read().decode("utf-8")
-        ids = re.findall(r'id:\s*"sf_(\d+)"', sf_js_content)
+        ids = re.findall(r'"?id"?\s*:\s*"sf_(\d+)"', sf_js_content)
         nxt = f"sf_{max(int(i) for i in ids)+1}" if ids else "sf_1"
         st.success(f"✅ {len(ids)} thuốc hiện có — ID tiếp theo: `{nxt}`")
 
@@ -465,7 +468,7 @@ with tab_choray:
     cr_js_content = None
     if cr_js_file:
         cr_js_content = cr_js_file.read().decode("utf-8")
-        ids = re.findall(rf'id:\s*"{cr_prefix}_(\d+)"', cr_js_content)
+        ids = re.findall(rf'"?id"?\s*:\s*"{cr_prefix}_(\d+)"', cr_js_content)
         nxt = f"{cr_prefix}_{max(int(i) for i in ids)+1}" if ids else f"{cr_prefix}_1"
         st.success(f"✅ {len(ids)} mục `{cr_prefix}_*` hiện có — ID tiếp theo: `{nxt}`")
 
