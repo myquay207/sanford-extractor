@@ -165,7 +165,7 @@ def call_ai(text_content: str, prompt: str) -> dict | list:
         try:
             response = model.generate_content(
                 full_prompt,
-                generation_config=genai.GenerationConfig(temperature=0.1, max_output_tokens=8192),
+                generation_config=genai.GenerationConfig(temperature=0.1, max_output_tokens=65536),
             )
             raw = response.text.strip()
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
