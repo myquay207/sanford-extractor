@@ -148,7 +148,12 @@ NỘI DUNG PHÁC ĐỒ:
 # ══════════════════════════════════════════════════════════════════
 
 def call_claude(text_content: str, prompt: str) -> dict | list:
-    api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+    api_key = (
+        st.session_state.get("manual_api_key", "")
+        or st.secrets.get("ANTHROPIC_API_KEY", "")
+    )
+    if not api_key:
+        raise ValueError("Chưa có API key. Nhập vào ô bên dưới.")
     client = anthropic.Anthropic(api_key=api_key)
     full_prompt = prompt + text_content
     last_err = None
@@ -272,6 +277,28 @@ Chụp ảnh sách → Mở <b>Gemini app</b> → Đính ảnh → Nhắn <i>"đ
 # ── Sidebar ────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Cấu hình")
+
+    # Kiểm tra key từ secrets trước
+    _secret_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+    if _secret_key:
+        st.success("✅ API Key đã cấu hình")
+    else:
+        st.markdown("**🔑 Anthropic API Key**")
+        _manual_key = st.text_input(
+            "API Key",
+            type="password",
+            placeholder="sk-ant-...",
+            label_visibility="collapsed",
+            key="manual_api_key_input",
+        )
+        if _manual_key:
+            st.session_state["manual_api_key"] = _manual_key
+            st.success("✅ Key đã nhập")
+        else:
+            st.warning("Cần nhập API Key để chạy")
+            st.caption("[Lấy key tại console.anthropic.com](https://console.anthropic.com)")
+
+    st.divider()
     st.markdown("**Màu nhóm thuốc** (Tab Sanford)")
     color_presets = {
         "🔴 Đỏ (Carbapenem)":           "#e63946",
@@ -324,9 +351,10 @@ with tab_sanford:
         st.success(f"✅ {len(ids)} thuốc hiện có — ID tiếp theo: `{nxt}`")
 
     st.markdown('<div class="step-label">Bước 4 — Trích xuất</div>', unsafe_allow_html=True)
-    sf_ready = bool(drug_name.strip()) and bool(sf_text.strip()) and bool(sf_js_content)
+    sf_ready = bool(drug_name.strip()) and bool(sf_text.strip()) and bool(sf_js_content) and bool(st.session_state.get("manual_api_key") or st.secrets.get("ANTHROPIC_API_KEY",""))
     if not sf_ready:
         miss = []
+        if not (st.session_state.get("manual_api_key") or st.secrets.get("ANTHROPIC_API_KEY","")): miss.append("API Key (sidebar)")
         if not drug_name.strip(): miss.append("tên thuốc")
         if not sf_text.strip(): miss.append("text Sanford")
         if not sf_js_content: miss.append("data-sanford.js")
@@ -417,9 +445,10 @@ with tab_choray:
         st.success(f"✅ {len(ids)} mục `{cr_prefix}_*` hiện có — ID tiếp theo: `{nxt}`")
 
     st.markdown('<div class="step-label">Bước 4 — Trích xuất</div>', unsafe_allow_html=True)
-    cr_ready = bool(cr_text.strip()) and bool(cr_js_content)
+    cr_ready = bool(cr_text.strip()) and bool(cr_js_content) and bool(st.session_state.get("manual_api_key") or st.secrets.get("ANTHROPIC_API_KEY",""))
     if not cr_ready:
         miss = []
+        if not (st.session_state.get("manual_api_key") or st.secrets.get("ANTHROPIC_API_KEY","")): miss.append("API Key (sidebar)")
         if not cr_text.strip(): miss.append("text phác đồ")
         if not cr_js_content: miss.append("data-choray.js")
         st.info(f"ℹ️ Còn thiếu: {', '.join(miss)}")
