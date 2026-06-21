@@ -77,25 +77,31 @@ SCHEMA (1 phác đồ):
           "rank": 1,
           "label": "Lựa chọn đầu tay",
           "drugs": "Tên thuốc + liều + đường dùng + tần suất đầy đủ",
-          "duration": "Thời gian điều trị nếu có",
-          "note": "Ghi chú lâm sàng quan trọng"
+          "duration": "Thời gian điều trị nếu có, null nếu text không đề cập",
+          "note": "Ghi chú lâm sàng quan trọng, null nếu text không đề cập"
         },
         {
           "rank": 2,
           "label": "Lựa chọn thay thế",
           "drugs": "...",
-          "duration": "",
-          "note": ""
+          "duration": null,
+          "note": null
         }
       ]
     }
   ]
 }
 
-QUY TẮC:
-- Trích xuất TẤT CẢ nhóm bệnh nhân và phác đồ
-- Giữ nguyên liều thuốc chính xác
-- Ghi chú đầy đủ — đặc biệt các lưu ý kỹ thuật quan trọng
+QUY TẮC BẮT BUỘC VỀ FIELD "note" VÀ "duration":
+- Đây là 2 field hay bị bỏ sót nhất khi đọc bảng — đọc THẬT KỸ trước khi quyết định.
+- Nếu trong text gốc CÓ thông tin ghi chú/thời gian cho mục này → bắt buộc phải lấy ra, dù chỉ là 1 câu ngắn hoặc 1 chú thích chân bảng (ký hiệu *, **, °, hoặc đoạn chữ nghiêng/nhỏ đặt ngay dưới hoặc cuối bảng).
+- Nếu trong text gốc thực sự KHÔNG có ghi chú/thời gian cho mục này → bắt buộc dùng giá trị null (không phải chuỗi rỗng "", không phải bỏ qua key).
+- TUYỆT ĐỐI KHÔNG được tự tóm tắt rút gọn ghi chú để "cho gọn" — phải lấy đủ ý, kể cả khi dài.
+- TUYỆT ĐỐI KHÔNG được suy diễn hay tự viết thêm ghi chú không có trong text gốc.
+
+QUY TẮC CHUNG:
+- Trích xuất TẤT CẢ nhóm bệnh nhân và phác đồ, không bỏ sót nhóm nào
+- Giữ nguyên liều thuốc chính xác, không làm tròn hay diễn giải lại số liệu
 - "color" luôn là "#7209b7"
 
 NỘI DUNG PHÁC ĐỒ:
@@ -110,23 +116,23 @@ SCHEMA (1 vi khuẩn):
 {
   "source": "choray",
   "organism": "Tên vi khuẩn",
-  "natural_resistance": "Kháng tự nhiên với (nếu có, nếu không: '')",
+  "natural_resistance": "Kháng tự nhiên với (nếu có), null nếu text không đề cập",
   "color": "#e63946",
   "sites": [
     {
       "site": "Vị trí nhiễm khuẩn",
       "conditions": "Bệnh cảnh cụ thể",
-      "duration": "Thời gian điều trị chung",
+      "duration": "Thời gian điều trị chung, null nếu text không đề cập",
       "tiers": [
         {
           "tier": "Mức kháng thuốc (Nhạy nhiều nhóm KS / MDR / PDR / XDR)",
-          "mic_note": "Ngưỡng MIC nếu có",
+          "mic_note": "Ngưỡng MIC nếu có, null nếu text không đề cập",
           "regimens": [
             {
               "rank": 1,
               "label": "Lựa chọn đầu tay",
               "drugs": "Tên thuốc + liều + đường dùng + tần suất đầy đủ",
-              "note": "Ghi chú lâm sàng quan trọng"
+              "note": "Ghi chú lâm sàng quan trọng, null nếu text không đề cập"
             }
           ]
         }
@@ -135,13 +141,67 @@ SCHEMA (1 vi khuẩn):
   ]
 }
 
-QUY TẮC:
-- Trích xuất TẤT CẢ vị trí nhiễm khuẩn và mức kháng thuốc
-- Giữ nguyên liều — đặc biệt công thức Colistin (CBA)
+QUY TẮC BẮT BUỘC VỀ FIELD "note", "duration", "mic_note", "natural_resistance":
+- Đây là các field hay bị bỏ sót nhất khi đọc bảng — đọc THẬT KỸ trước khi quyết định.
+- Nếu trong text gốc CÓ thông tin cho field này → bắt buộc phải lấy ra, dù chỉ là 1 câu ngắn hoặc 1 chú thích chân bảng (ký hiệu *, **, °, hoặc đoạn chữ nghiêng/nhỏ đặt ngay dưới hoặc cuối bảng).
+- Nếu trong text gốc thực sự KHÔNG có thông tin cho field này → bắt buộc dùng giá trị null (không phải chuỗi rỗng "", không phải bỏ qua key).
+- TUYỆT ĐỐI KHÔNG được tự tóm tắt rút gọn ghi chú để "cho gọn" — phải lấy đủ ý, kể cả khi dài.
+- TUYỆT ĐỐI KHÔNG được suy diễn hay tự viết thêm ghi chú không có trong text gốc.
+- Đặc biệt chú ý công thức tính liều Colistin (CBA) — đây là phần hay có chú thích công thức quy đổi (vd: 1mg CBA = ... IU) thường nằm ở cuối — không được bỏ sót.
+
+QUY TẮC CHUNG:
+- Trích xuất TẤT CẢ vị trí nhiễm khuẩn và mức kháng thuốc, không bỏ sót mức nào (kể cả PDR/XDR nếu có)
+- Giữ nguyên liều — đặc biệt công thức Colistin (CBA), không làm tròn số liệu
 - "color" luôn là "#e63946"
 
 NỘI DUNG PHÁC ĐỒ:
 """
+
+# ── Prompt đối chiếu (self-audit) — chạy SAU khi đã có JSON ─────────
+AUDIT_PROMPT = """Bạn là người kiểm tra chất lượng dữ liệu y khoa, đóng vai trò phản biện.
+Dưới đây là (1) text gốc trích từ sách, và (2) JSON đã được trích xuất từ text đó.
+
+Nhiệm vụ: so sánh JSON với text gốc, tìm các trường hợp:
+- Có chú thích / ghi chú / thời gian điều trị / điều kiện đặc biệt trong text gốc nhưng KHÔNG xuất hiện (hoặc bị null/rỗng) trong JSON
+- Có thuốc/liều/nhóm bệnh nhân trong text gốc nhưng bị thiếu hoàn toàn trong JSON
+- Số liệu liều dùng trong JSON không khớp với text gốc
+
+Chỉ trả về JSON THUẦN theo format sau, không markdown, không giải thích thêm:
+{
+  "issues": [
+    {"loc": "Mô tả ngắn vị trí (vd: 'Nhóm Người >50 tuổi, lựa chọn thay thế')", "problem": "Mô tả ngắn vấn đề"}
+  ],
+  "ok": true/false
+}
+Nếu không phát hiện vấn đề gì, trả về {"issues": [], "ok": true}.
+
+TEXT GỐC:
+{ORIGINAL}
+
+JSON ĐÃ TRÍCH XUẤT:
+{EXTRACTED}
+"""
+
+
+def run_audit(original_text: str, extracted_json) -> dict:
+    """Gọi Gemini lần 2 để đối chiếu JSON với text gốc, tìm chỗ nghi thiếu."""
+    api_key = get_api_key()
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(GEMINI_MODEL)
+    prompt = AUDIT_PROMPT.replace("{ORIGINAL}", original_text).replace(
+        "{EXTRACTED}", json.dumps(extracted_json, ensure_ascii=False, indent=2)
+    )
+    try:
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(temperature=0.1, max_output_tokens=8192),
+        )
+        raw = response.text.strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        return json.loads(raw)
+    except Exception as e:
+        return {"issues": [], "ok": None, "error": str(e)}
 
 # ══════════════════════════════════════════════════════════════════
 # HÀM XỬ LÝ
@@ -489,11 +549,25 @@ with tab_choray:
             prog.progress(20, text="🤖 Gemini đang phân tích phác đồ...")
             result = call_ai(cr_text.strip(), cr_prompt)
             elapsed = time.time() - t0
-            prog.progress(70, text="✅ Xong — ghép vào JS...")
+            prog.progress(50, text="🔍 Đang đối chiếu lại với text gốc...")
 
             items = result if isinstance(result, list) else [result]
             st.subheader(f"📋 Trích xuất được {len(items)} phác đồ")
             st.json(result)
+
+            # ── Bước đối chiếu (self-audit) ─────────────────────────
+            audit = run_audit(cr_text.strip(), result)
+            if audit.get("ok") is None:
+                st.warning(f"⚠️ Không chạy được bước đối chiếu tự động ({audit.get('error','')}). Bạn nên tự rà lại JSON phía trên.")
+            elif audit.get("issues"):
+                st.error(f"⚠️ Phát hiện {len(audit['issues'])} chỗ NGHI THIẾU/SAI — hãy kiểm tra lại trước khi dùng:")
+                for iss in audit["issues"]:
+                    st.markdown(f"- **{iss.get('loc','?')}**: {iss.get('problem','')}")
+                st.caption("Đây chỉ là cảnh báo tự động, có thể có sai sót — bạn vẫn có thể tải file nếu thấy ổn, hoặc paste lại text rõ hơn rồi chạy lại.")
+            else:
+                st.success("✅ Đối chiếu xong — không phát hiện chỗ nghi thiếu rõ ràng.")
+
+            prog.progress(70, text="✅ Xong — ghép vào JS...")
 
             new_js = cr_js_content
             added_ids = []
