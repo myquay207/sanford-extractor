@@ -10,7 +10,7 @@ streamlit run sanford_tool_mobile.py
 """
 
 import streamlit as st
-import json, re, time
+import json, re, time, requests
 import google.generativeai as genai
 
 GEMINI_MODEL = "gemini-2.5-flash-lite"
@@ -203,6 +203,44 @@ def run_audit(original_text: str, extracted_json) -> dict:
     except Exception as e:
         return {"issues": [], "ok": None, "error": str(e)}
 
+
+# ══════════════════════════════════════════════════════════════════
+# SUPABASE HELPERS
+# ══════════════════════════════════════════════════════════════════
+
+def get_supabase_cfg():
+    url = st.session_state.get("sb_url") or st.secrets.get("SUPABASE_URL", "")
+    key = st.session_state.get("sb_key") or st.secrets.get("SUPABASE_KEY", "")
+    return url.rstrip("/"), key
+
+def sb_get_next_id(table: str, prefix: str) -> str:
+    url, key = get_supabase_cfg()
+    r = requests.get(
+        f"{url}/rest/v1/{table}?select=id&order=id.desc&limit=100",
+        headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        timeout=10
+    )
+    r.raise_for_status()
+    ids = [row["id"] for row in r.json() if row.get("id","").startswith(prefix + "_")]
+    nums = [int(i.split("_")[-1]) for i in ids if i.split("_")[-1].isdigit()]
+    return f"{prefix}_{max(nums)+1}" if nums else f"{prefix}_1"
+
+def sb_insert(table: str, record: dict):
+    url, key = get_supabase_cfg()
+    r = requests.post(
+        f"{url}/rest/v1/{table}",
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        },
+        json=record,
+        timeout=15
+    )
+    r.raise_for_status()
+    return r.json()
+
 # ══════════════════════════════════════════════════════════════════
 # HÀM XỬ LÝ
 # ══════════════════════════════════════════════════════════════════
@@ -365,6 +403,22 @@ with st.sidebar:
             st.caption("Free tier: 15 req/phút, không tốn tiền")
 
     st.divider()
+    st.divider()
+    st.markdown("**🗄️ Supabase**")
+    _sb_url = st.text_input("Project URL", placeholder="https://xxx.supabase.co",
+        value=st.session_state.get("sb_url",""), key="sb_url_input",
+        label_visibility="visible")
+    if _sb_url: st.session_state["sb_url"] = _sb_url
+    _sb_key = st.text_input("Publishable Key", type="password",
+        placeholder="sb_publishable_...", value=st.session_state.get("sb_key",""),
+        key="sb_key_input", label_visibility="visible")
+    if _sb_key: st.session_state["sb_key"] = _sb_key
+    if _sb_url and _sb_key:
+        st.success("✅ Supabase đã cấu hình")
+    else:
+        st.warning("Cần nhập URL + Key để push lên Supabase")
+
+    st.divider()
     st.markdown("**Màu nhóm thuốc** (Tab Sanford)")
     color_presets = {
         "🔴 Đỏ (Carbapenem)":           "#e63946",
@@ -417,27 +471,18 @@ with tab_sanford:
         word_count = len(sf_text.split())
         st.caption(f"📝 {word_count} từ — {len(sf_text)} ký tự")
 
-    st.markdown('<div class="step-label">Bước 3 — Upload data-sanford.js</div>', unsafe_allow_html=True)
-    sf_js_file = st.file_uploader("data-sanford.js", type=["js"],
-                                   label_visibility="collapsed", key="sf_js")
-    sf_js_content = None
-    if sf_js_file:
-        sf_js_content = sf_js_file.read().decode("utf-8")
-        ids = re.findall(r'"?id"?\s*:\s*"sf_(\d+)"', sf_js_content)
-        nxt = f"sf_{max(int(i) for i in ids)+1}" if ids else "sf_1"
-        st.success(f"✅ {len(ids)} thuốc hiện có — ID tiếp theo: `{nxt}`")
-
-    st.markdown('<div class="step-label">Bước 4 — Trích xuất</div>', unsafe_allow_html=True)
-    sf_ready = bool(drug_name.strip()) and bool(sf_text.strip()) and bool(sf_js_content) and bool(st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY",""))
+    st.markdown('<div class="step-label">Bước 3 — Trích xuất & Push Supabase</div>', unsafe_allow_html=True)
+    sb_ok = bool(st.session_state.get("sb_url")) and bool(st.session_state.get("sb_key"))
+    sf_ready = bool(drug_name.strip()) and bool(sf_text.strip()) and bool(st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")) and sb_ok
     if not sf_ready:
         miss = []
-        if not (st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")): miss.append("API Key (sidebar)")
+        if not (st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")): miss.append("Gemini API Key")
         if not drug_name.strip(): miss.append("tên thuốc")
         if not sf_text.strip(): miss.append("text Sanford")
-        if not sf_js_content: miss.append("data-sanford.js")
+        if not sb_ok: miss.append("Supabase URL + Key (sidebar)")
         st.info(f"ℹ️ Còn thiếu: {', '.join(miss)}")
 
-    if st.button("🚀 Trích xuất thuốc Sanford", disabled=not sf_ready,
+    if st.button("🚀 Trích xuất & Push lên Supabase", disabled=not sf_ready,
                  type="primary", use_container_width=True, key="sf_run"):
         prog = st.progress(0, text="Đang gửi đến Gemini...")
         try:
@@ -447,25 +492,19 @@ with tab_sanford:
             result = call_ai(full_text, SANFORD_PROMPT)
             elapsed = time.time() - t0
             result["color"] = final_color
-            prog.progress(70, text="✅ Xong — ghép vào JS...")
+            prog.progress(60, text="✅ Xong — đang push lên Supabase...")
 
             st.subheader("📋 JSON trích xuất")
             st.json(result)
 
-            new_id = generate_new_id(sf_js_content, "sf")
-            obj_str = sanford_to_js(result, new_id)
-            new_js = append_to_js_array(sf_js_content, obj_str, "SANFORD_ANTIBIOTICS")
+            new_id = sb_get_next_id("sanford_antibiotics", "sf")
+            result["id"] = new_id
+            result["source"] = "sanford"
+            sb_insert("sanford_antibiotics", result)
 
-            if new_js is None:
-                st.error("❌ Không tìm thấy mảng SANFORD_ANTIBIOTICS trong file!")
-            else:
-                prog.progress(100, text="✅ Hoàn thành!")
-                st.success(f"🎉 **{result.get('name', drug_name)}** (ID: `{new_id}`) — {elapsed:.1f}s")
-                st.download_button("⬇️ Tải data-sanford.js mới", new_js.encode("utf-8"),
-                                   "data-sanford.js", "text/javascript",
-                                   use_container_width=True, type="primary")
-                with st.expander("👁️ Xem đoạn JS vừa thêm"):
-                    st.code(obj_str, language="javascript")
+            prog.progress(100, text="✅ Hoàn thành!")
+            st.success(f"🎉 **{result.get('name', drug_name)}** (ID: `{new_id}`) đã push lên Supabase — {elapsed:.1f}s")
+            st.balloons()
 
         except json.JSONDecodeError as e:
             prog.progress(0)
@@ -475,6 +514,7 @@ with tab_sanford:
             prog.progress(0)
             st.error(f"❌ {type(e).__name__}: {e}")
             st.exception(e)
+
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -522,26 +562,17 @@ with tab_choray:
         word_count = len(cr_text.split())
         st.caption(f"📝 {word_count} từ — {len(cr_text)} ký tự")
 
-    st.markdown('<div class="step-label">Bước 3 — Upload data-choray.js</div>', unsafe_allow_html=True)
-    cr_js_file = st.file_uploader("data-choray.js", type=["js"],
-                                   label_visibility="collapsed", key="cr_js")
-    cr_js_content = None
-    if cr_js_file:
-        cr_js_content = cr_js_file.read().decode("utf-8")
-        ids = re.findall(rf'"?id"?\s*:\s*"{cr_prefix}_(\d+)"', cr_js_content)
-        nxt = f"{cr_prefix}_{max(int(i) for i in ids)+1}" if ids else f"{cr_prefix}_1"
-        st.success(f"✅ {len(ids)} mục `{cr_prefix}_*` hiện có — ID tiếp theo: `{nxt}`")
-
-    st.markdown('<div class="step-label">Bước 4 — Trích xuất</div>', unsafe_allow_html=True)
-    cr_ready = bool(cr_text.strip()) and bool(cr_js_content) and bool(st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY",""))
+    st.markdown('<div class="step-label">Bước 3 — Trích xuất & Push Supabase</div>', unsafe_allow_html=True)
+    sb_ok = bool(st.session_state.get("sb_url")) and bool(st.session_state.get("sb_key"))
+    cr_ready = bool(cr_text.strip()) and bool(st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")) and sb_ok
     if not cr_ready:
         miss = []
-        if not (st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")): miss.append("API Key (sidebar)")
+        if not (st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")): miss.append("Gemini API Key")
         if not cr_text.strip(): miss.append("text phác đồ")
-        if not cr_js_content: miss.append("data-choray.js")
+        if not sb_ok: miss.append("Supabase URL + Key (sidebar)")
         st.info(f"ℹ️ Còn thiếu: {', '.join(miss)}")
 
-    if st.button("🚀 Trích xuất phác đồ Chợ Rẫy", disabled=not cr_ready,
+    if st.button("🚀 Trích xuất & Push lên Supabase", disabled=not cr_ready,
                  type="primary", use_container_width=True, key="cr_run"):
         prog = st.progress(0, text="Đang gửi đến Gemini...")
         try:
@@ -563,32 +594,25 @@ with tab_choray:
                 st.error(f"⚠️ Phát hiện {len(audit['issues'])} chỗ NGHI THIẾU/SAI — hãy kiểm tra lại trước khi dùng:")
                 for iss in audit["issues"]:
                     st.markdown(f"- **{iss.get('loc','?')}**: {iss.get('problem','')}")
-                st.caption("Đây chỉ là cảnh báo tự động, có thể có sai sót — bạn vẫn có thể tải file nếu thấy ổn, hoặc paste lại text rõ hơn rồi chạy lại.")
+                st.caption("Đây chỉ là cảnh báo tự động — bạn vẫn có thể push nếu thấy ổn.")
             else:
                 st.success("✅ Đối chiếu xong — không phát hiện chỗ nghi thiếu rõ ràng.")
 
-            prog.progress(70, text="✅ Xong — ghép vào JS...")
+            prog.progress(70, text="🗄️ Đang push lên Supabase...")
 
-            new_js = cr_js_content
+            cr_table = "choray_empirical" if is_empirical else "choray_targeted"
             added_ids = []
             for item in items:
-                new_id = generate_new_id(new_js, cr_prefix)
-                obj_str = choray_to_js(item, new_id)
-                new_js_temp = append_to_js_array(new_js, obj_str, cr_array)
-                if new_js_temp is None:
-                    st.error(f"❌ Không tìm thấy mảng `{cr_array}` trong file!")
-                    st.stop()
-                new_js = new_js_temp
+                new_id = sb_get_next_id(cr_table, cr_prefix)
+                item["id"] = new_id
+                item["source"] = "choray"
+                sb_insert(cr_table, item)
                 added_ids.append(new_id)
 
             prog.progress(100, text="✅ Hoàn thành!")
             ids_str = ", ".join(f"`{i}`" for i in added_ids)
-            st.success(f"🎉 Đã thêm **{len(items)} phác đồ** (ID: {ids_str}) — {elapsed:.1f}s")
-            st.download_button("⬇️ Tải data-choray.js mới", new_js.encode("utf-8"),
-                               "data-choray.js", "text/javascript",
-                               use_container_width=True, type="primary")
-            with st.expander("👁️ Xem JSON đã thêm"):
-                st.json(result)
+            st.success(f"🎉 Đã push **{len(items)} phác đồ** lên Supabase (ID: {ids_str}) — {elapsed:.1f}s")
+            st.balloons()
 
         except json.JSONDecodeError as e:
             prog.progress(0)
@@ -598,6 +622,7 @@ with tab_choray:
             prog.progress(0)
             st.error(f"❌ {type(e).__name__}: {e}")
             st.exception(e)
+
 
     with st.expander("📖 Hướng dẫn chi tiết"):
         st.markdown("""
