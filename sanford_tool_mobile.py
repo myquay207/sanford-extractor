@@ -225,6 +225,26 @@ def sb_get_next_id(table: str, prefix: str) -> str:
     nums = [int(i.split("_")[-1]) for i in ids if i.split("_")[-1].isdigit()]
     return f"{prefix}_{max(nums)+1}" if nums else f"{prefix}_1"
 
+# Field hợp lệ cho từng bảng
+ALLOWED_FIELDS = {
+    "choray_empirical":    {"id", "system", "condition", "color", "groups"},
+    "choray_targeted":     {"id", "organism", "color", "sites"},
+    "sanford_antibiotics": {"id", "name", "class_", "color", "spectrum", "dosing", "notes", "source"},
+    "sanford_protocols":   {"id", "system", "condition", "color", "groups", "source"},
+}
+
+def clean_record(table: str, record: dict) -> dict:
+    """Chỉ giữ lại field hợp lệ, bỏ field thừa để tránh Supabase reject."""
+    allowed = ALLOWED_FIELDS.get(table)
+    if not allowed:
+        return record  # bảng chưa khai báo → giữ nguyên
+    cleaned = {k: v for k, v in record.items() if k in allowed}
+    removed = [k for k in record if k not in allowed]
+    if removed:
+        import streamlit as st
+        st.caption(f"⚠️ Đã bỏ field thừa không có trong bảng: {removed}")
+    return cleaned
+
 def sb_insert(table: str, record: dict):
     url, key = get_supabase_cfg()
     r = requests.post(
@@ -566,7 +586,7 @@ with tab_sanford:
             new_id = sb_get_next_id("sanford_antibiotics", "sf")
             result["id"] = new_id
             result["source"] = "sanford"
-            sb_insert("sanford_antibiotics", result)
+            sb_insert("sanford_antibiotics", clean_record("sanford_antibiotics", result))
 
             prog.progress(100, text="✅ Hoàn thành!")
             st.success(f"🎉 **{result.get('name', drug_name)}** (ID: `{new_id}`) đã push lên Supabase — {elapsed:.1f}s")
@@ -603,9 +623,10 @@ with tab_choray:
         st.info("Phần 5.15, 5.16... — phân nhánh Nhạy/MDR/PDR → ghi vào **CHORAY_TARGETED**")
         cr_array, cr_prefix, cr_prompt = "CHORAY_TARGETED", "tgt", CHORAY_TARGETED_PROMPT
 
-    st.markdown('<div class="step-label">Bước 2 — Paste text từ Gemini app</div>', unsafe_allow_html=True)
-    st.caption("Chụp ảnh sách Chợ Rẫy → Gemini đọc → copy toàn bộ text → paste vào đây")
-    st.caption("💡 Paste nhiều phần cùng lúc cũng được — Gemini sẽ tự tách thành nhiều phác đồ")
+    st.markdown('<div class="step-label">Bước 2 — Paste text từ Gemini</div>', unsafe_allow_html=True)
+    st.caption("Chụp ảnh sách → Gemini đọc text → copy toàn bộ → paste vào đây")
+    use_json_mode = False
+    cr_json_raw = ""
     cr_text = st.text_area(
         "Nội dung phác đồ",
         height=320,
@@ -613,20 +634,18 @@ with tab_choray:
         label_visibility="collapsed",
         key="cr_text",
     )
-    # Upload file .txt thay thế cho paste
     cr_txt_file = st.file_uploader(
         "Hoặc upload file .txt",
         type=["txt"],
         label_visibility="visible",
         key="cr_txt",
-        help="Upload file .txt từ Gemini app — tự động điền vào ô text trên"
+        help="Upload file .txt từ Gemini — tự động điền vào ô trên"
     )
     if cr_txt_file:
         cr_text = cr_txt_file.read().decode("utf-8")
         st.success(f"✅ Đã đọc file: {cr_txt_file.name} — {len(cr_text.split())} từ")
     elif cr_text:
-        word_count = len(cr_text.split())
-        st.caption(f"📝 {word_count} từ — {len(cr_text)} ký tự")
+        st.caption(f"📝 {len(cr_text.split())} từ — {len(cr_text)} ký tự")
 
     st.markdown('<div class="step-label">Bước 3 — Chế độ push</div>', unsafe_allow_html=True)
     sb_ok = bool(st.session_state.get("sb_url")) and bool(st.session_state.get("sb_key"))
@@ -667,13 +686,13 @@ with tab_choray:
         cr_ready = False
     if not cr_ready:
         miss = []
-        if not (st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")): miss.append("Gemini API Key")
         if not cr_text.strip(): miss.append("text phác đồ")
+        if not (st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")): miss.append("Gemini API Key")
         if not sb_ok: miss.append("Supabase URL + Key (sidebar)")
         if is_merge and not target_record_id: miss.append("chọn bệnh lý cần bổ sung")
         st.info(f"ℹ️ Còn thiếu: {', '.join(miss)}")
 
-    btn_label = "🔄 Trích xuất & Merge vào bệnh lý đã chọn" if is_merge else "🚀 Trích xuất & Thêm mới vào Supabase"
+    btn_label = "🔄 Trích xuất & Merge vào bệnh lý đã chọn" if is_merge else "🚀 Trích xuất & Push lên Supabase"
     if st.button(btn_label, disabled=not cr_ready,
                  type="primary", use_container_width=True, key="cr_run"):
         prog = st.progress(0, text="Đang gửi đến Gemini...")
@@ -683,12 +702,10 @@ with tab_choray:
             result = call_ai(cr_text.strip(), cr_prompt)
             elapsed = time.time() - t0
             prog.progress(50, text="🔍 Đang đối chiếu lại với text gốc...")
-
             items = result if isinstance(result, list) else [result]
             st.subheader(f"📋 Trích xuất được {len(items)} nhóm/phác đồ")
             st.json(result)
 
-            # ── Bước đối chiếu (self-audit) ─────────────────────────
             audit = run_audit(cr_text.strip(), result)
             if audit.get("ok") is None:
                 st.warning(f"⚠️ Không chạy được bước đối chiếu tự động ({audit.get('error','')}). Bạn nên tự rà lại JSON phía trên.")
@@ -700,8 +717,8 @@ with tab_choray:
             else:
                 st.success("✅ Đối chiếu xong — không phát hiện chỗ nghi thiếu rõ ràng.")
 
-            cr_table = "choray_empirical" if is_empirical else "choray_targeted"
             prog.progress(70, text="🗄️ Đang push lên Supabase...")
+            cr_table = "choray_empirical" if is_empirical else "choray_targeted"
 
             if is_merge:
                 # ── Merge vào bản ghi đã có ──────────────────────────
@@ -723,8 +740,7 @@ with tab_choray:
                 for item in items:
                     new_id = sb_get_next_id(cr_table, cr_prefix)
                     item["id"] = new_id
-                    item["source"] = "choray"
-                    sb_insert(cr_table, item)
+                    sb_insert(cr_table, clean_record(cr_table, item))
                     added_ids.append(new_id)
                 prog.progress(100, text="✅ Hoàn thành!")
                 ids_str = ", ".join(f"`{i}`" for i in added_ids)
