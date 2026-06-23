@@ -241,6 +241,72 @@ def sb_insert(table: str, record: dict):
     r.raise_for_status()
     return r.json()
 
+def sb_list(table: str, fields: str = "id,condition,system") -> list:
+    """Lấy danh sách bản ghi để chọn."""
+    url, key = get_supabase_cfg()
+    r = requests.get(
+        f"{url}/rest/v1/{table}?select={fields}&order=id.asc",
+        headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        timeout=10
+    )
+    r.raise_for_status()
+    return r.json()
+
+def sb_get_one(table: str, record_id: str) -> dict:
+    """Lấy 1 bản ghi đầy đủ theo id."""
+    url, key = get_supabase_cfg()
+    r = requests.get(
+        f"{url}/rest/v1/{table}?id=eq.{record_id}&select=*",
+        headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        timeout=10
+    )
+    r.raise_for_status()
+    data = r.json()
+    return data[0] if data else None
+
+def sb_update_record(table: str, record_id: str, fields: dict):
+    """Cập nhật 1 bản ghi theo id."""
+    url, key = get_supabase_cfg()
+    r = requests.patch(
+        f"{url}/rest/v1/{table}?id=eq.{record_id}",
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        },
+        json=fields,
+        timeout=15
+    )
+    r.raise_for_status()
+    return r.json()
+
+def merge_groups(existing: list, new_groups: list) -> list:
+    """
+    Merge nhóm BN mới vào danh sách đã có.
+    - Nếu tên group trùng → merge regimens (thêm cái chưa có, theo rank)
+    - Nếu tên group mới → append thêm
+    """
+    merged = [dict(g) for g in existing]
+    for ng in new_groups:
+        found = next((g for g in merged if g.get("group","").strip() == ng.get("group","").strip()), None)
+        if found:
+            # Merge regimens: thêm rank chưa có
+            existing_ranks = {r.get("rank") for r in found.get("regimens", [])}
+            for nr in ng.get("regimens", []):
+                if nr.get("rank") not in existing_ranks:
+                    found.setdefault("regimens", []).append(nr)
+            # Cập nhật organisms nếu đang rỗng
+            if not found.get("organisms") and ng.get("organisms"):
+                found["organisms"] = ng["organisms"]
+            if not found.get("group_note") and ng.get("group_note"):
+                found["group_note"] = ng["group_note"]
+        else:
+            merged.append(ng)
+    return merged
+
+
+
 # ══════════════════════════════════════════════════════════════════
 # HÀM XỬ LÝ
 # ══════════════════════════════════════════════════════════════════
@@ -562,17 +628,53 @@ with tab_choray:
         word_count = len(cr_text.split())
         st.caption(f"📝 {word_count} từ — {len(cr_text)} ký tự")
 
-    st.markdown('<div class="step-label">Bước 3 — Trích xuất & Push Supabase</div>', unsafe_allow_html=True)
+    st.markdown('<div class="step-label">Bước 3 — Chế độ push</div>', unsafe_allow_html=True)
     sb_ok = bool(st.session_state.get("sb_url")) and bool(st.session_state.get("sb_key"))
+
+    cr_mode = st.radio(
+        "Chế độ",
+        ["➕ Thêm bệnh lý mới vào Supabase", "🔄 Bổ sung vào bệnh lý đã có (merge nhóm BN)"],
+        label_visibility="collapsed", key="cr_mode"
+    )
+    is_merge = "merge" in cr_mode or "Bổ sung" in cr_mode
+
+    # Nếu chọn merge → hiện danh sách bệnh lý để chọn
+    target_record_id = None
+    if is_merge and sb_ok:
+        cr_table_for_list = "choray_empirical" if is_empirical else "choray_targeted"
+        try:
+            list_field = "id,condition,system" if is_empirical else "id,organism"
+            existing_records = sb_list(cr_table_for_list, list_field)
+            if existing_records:
+                def fmt_rec(r):
+                    if is_empirical:
+                        return f"{r.get('system','?')} — {r.get('condition','?')} [{r.get('id')}]"
+                    return f"{r.get('organism','?')} [{r.get('id')}]"
+                options = {fmt_rec(r): r["id"] for r in existing_records}
+                chosen_label = st.selectbox(
+                    "Chọn bệnh lý / vi khuẩn cần bổ sung vào:",
+                    list(options.keys()), key="cr_target"
+                )
+                target_record_id = options[chosen_label]
+                st.info(f"📌 Sẽ merge nhóm BN mới vào: **{chosen_label}**")
+            else:
+                st.warning("Chưa có bản ghi nào trong bảng này.")
+        except Exception as ex:
+            st.error(f"Không tải được danh sách: {ex}")
+
     cr_ready = bool(cr_text.strip()) and bool(st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")) and sb_ok
+    if is_merge and not target_record_id:
+        cr_ready = False
     if not cr_ready:
         miss = []
         if not (st.session_state.get("manual_api_key") or st.secrets.get("GEMINI_API_KEY","")): miss.append("Gemini API Key")
         if not cr_text.strip(): miss.append("text phác đồ")
         if not sb_ok: miss.append("Supabase URL + Key (sidebar)")
+        if is_merge and not target_record_id: miss.append("chọn bệnh lý cần bổ sung")
         st.info(f"ℹ️ Còn thiếu: {', '.join(miss)}")
 
-    if st.button("🚀 Trích xuất & Push lên Supabase", disabled=not cr_ready,
+    btn_label = "🔄 Trích xuất & Merge vào bệnh lý đã chọn" if is_merge else "🚀 Trích xuất & Thêm mới vào Supabase"
+    if st.button(btn_label, disabled=not cr_ready,
                  type="primary", use_container_width=True, key="cr_run"):
         prog = st.progress(0, text="Đang gửi đến Gemini...")
         try:
@@ -583,7 +685,7 @@ with tab_choray:
             prog.progress(50, text="🔍 Đang đối chiếu lại với text gốc...")
 
             items = result if isinstance(result, list) else [result]
-            st.subheader(f"📋 Trích xuất được {len(items)} phác đồ")
+            st.subheader(f"📋 Trích xuất được {len(items)} nhóm/phác đồ")
             st.json(result)
 
             # ── Bước đối chiếu (self-audit) ─────────────────────────
@@ -598,20 +700,36 @@ with tab_choray:
             else:
                 st.success("✅ Đối chiếu xong — không phát hiện chỗ nghi thiếu rõ ràng.")
 
+            cr_table = "choray_empirical" if is_empirical else "choray_targeted"
             prog.progress(70, text="🗄️ Đang push lên Supabase...")
 
-            cr_table = "choray_empirical" if is_empirical else "choray_targeted"
-            added_ids = []
-            for item in items:
-                new_id = sb_get_next_id(cr_table, cr_prefix)
-                item["id"] = new_id
-                item["source"] = "choray"
-                sb_insert(cr_table, item)
-                added_ids.append(new_id)
+            if is_merge:
+                # ── Merge vào bản ghi đã có ──────────────────────────
+                existing = sb_get_one(cr_table, target_record_id)
+                if not existing:
+                    st.error(f"❌ Không tìm thấy bản ghi {target_record_id}")
+                    st.stop()
+                all_new_groups = []
+                for item in items:
+                    all_new_groups.extend(item.get("groups", []))
+                merged_groups = merge_groups(existing.get("groups", []), all_new_groups)
+                sb_update_record(cr_table, target_record_id, {"groups": merged_groups})
+                prog.progress(100, text="✅ Hoàn thành!")
+                st.success(f"🎉 Đã merge **{len(all_new_groups)} nhóm BN** vào `{target_record_id}` — {elapsed:.1f}s")
+                st.info(f"📊 Tổng nhóm BN sau merge: **{len(merged_groups)}**")
+            else:
+                # ── Thêm mới ─────────────────────────────────────────
+                added_ids = []
+                for item in items:
+                    new_id = sb_get_next_id(cr_table, cr_prefix)
+                    item["id"] = new_id
+                    item["source"] = "choray"
+                    sb_insert(cr_table, item)
+                    added_ids.append(new_id)
+                prog.progress(100, text="✅ Hoàn thành!")
+                ids_str = ", ".join(f"`{i}`" for i in added_ids)
+                st.success(f"🎉 Đã thêm **{len(items)} phác đồ** lên Supabase (ID: {ids_str}) — {elapsed:.1f}s")
 
-            prog.progress(100, text="✅ Hoàn thành!")
-            ids_str = ", ".join(f"`{i}`" for i in added_ids)
-            st.success(f"🎉 Đã push **{len(items)} phác đồ** lên Supabase (ID: {ids_str}) — {elapsed:.1f}s")
             st.balloons()
 
         except json.JSONDecodeError as e:
